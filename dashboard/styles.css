@@ -361,6 +361,64 @@ h3.subhead {
   color: var(--text);
 }
 
+.month {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.month.hidden,
+.week.hidden,
+.hidden {
+  display: none;
+}
+
+.month-dow {
+  font-size: 10px;
+  color: var(--secondary);
+  text-align: center;
+  font-weight: 600;
+  padding-bottom: 2px;
+}
+
+.month-cell {
+  aspect-ratio: 1;
+  border: none;
+  border-radius: 8px;
+  background: #f2f2f7;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  color: inherit;
+}
+
+.month-cell.empty {
+  background: transparent;
+  cursor: default;
+}
+
+.month-cell.active {
+  box-shadow: inset 0 0 0 2px #5e5ce6;
+}
+
+.month-cell.today {
+  font-weight: 800;
+}
+
+.month-cell.future {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.legend li span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-right: 8px;
+}
+
 .toggle {
   position: relative;
   width: 51px;

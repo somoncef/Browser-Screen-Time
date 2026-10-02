@@ -3,6 +3,15 @@
  */
 
 const WEEKDAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const WEEKDAY_FULL = [
+  "Sunday",
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday"
+];
 
 /** YYYY-MM-DD in local time. */
 export function localDateKey(date = new Date()) {
@@ -31,8 +40,42 @@ export function weekDateKeys(date = new Date()) {
   return keys;
 }
 
+/** All YYYY-MM-DD keys in the calendar month of `date`. */
+export function monthDateKeys(date = new Date()) {
+  const y = date.getFullYear();
+  const m = date.getMonth();
+  const last = new Date(y, m + 1, 0).getDate();
+  const keys = [];
+  for (let d = 1; d <= last; d++) {
+    keys.push(localDateKey(new Date(y, m, d)));
+  }
+  return keys;
+}
+
+export function monthTitle(date = new Date()) {
+  return date.toLocaleString(undefined, { month: "long", year: "numeric" });
+}
+
+export function retainedDateKeys(retention, date = new Date()) {
+  return retention === "month" ? monthDateKeys(date) : weekDateKeys(date);
+}
+
 export function weekdayLabel(dateKey) {
   return WEEKDAY_SHORT[parseDateKey(dateKey).getDay()];
+}
+
+export function weekdayFull(dateKey) {
+  return WEEKDAY_FULL[parseDateKey(dateKey).getDay()];
+}
+
+/** "Today", "Yesterday", or "Thursday" for the dashboard hero. */
+export function dayHeading(dateKey, now = new Date()) {
+  const today = localDateKey(now);
+  if (dateKey === today) return "Today";
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (dateKey === localDateKey(yesterday)) return "Yesterday";
+  return weekdayFull(dateKey);
 }
 
 export function parseHHMM(value) {

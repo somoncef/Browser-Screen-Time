@@ -5,21 +5,29 @@
  * Reads/writes chrome.storage.local. Usage ticks happen in the service worker.
  */
 
-import { CATEGORIES, PRESET_SITES, CATEGORY_BY_ID } from "../shared/constants.js";
+import { CATEGORIES, PRESET_SITES, CATEGORY_BY_ID, SITE_SLICE_COLORS } from "../shared/constants.js";
 import { faviconUrl, normalizeDomain } from "../shared/domains.js";
 import {
   loadState,
+  pruneHistory,
   saveState,
   sumUsage,
-  totalForDate
+  totalForDate,
+  usageMapForDate
 } from "../shared/storage.js";
 import {
+  dayHeading,
   formatDuration,
   formatDurationLarge,
   localDateKey,
+  monthDateKeys,
+  monthTitle,
+  parseDateKey,
+  retainedDateKeys,
   weekDateKeys,
   weekdayLabel
 } from "../shared/time.js";
+import { limitToMinutes, minutesToDisplay } from "../shared/sites.js";
 
 const $ = (id) => document.getElementById(id);
 
@@ -85,6 +93,7 @@ function bindEvents() {
   $("downtime-enabled").addEventListener("change", saveDowntime);
   $("downtime-start").addEventListener("change", saveDowntime);
   $("downtime-end").addEventListener("change", saveDowntime);
+  $("data-retention").addEventListener("change", saveRetention);
 
   $("allowed-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -102,6 +111,7 @@ function bindEvents() {
 function openSheet() {
   $("add-domain").value = "";
   $("add-limit").value = "30";
+  $("add-limit-unit").value = "minutes";
   $("add-redirect").value = "";
   $("add-category").value = "other";
   document.querySelectorAll(".preset").forEach((el) => el.classList.remove("selected"));
@@ -118,25 +128,42 @@ async function onAddSite() {
     $("add-domain").focus();
     return;
   }
-  if (state.sites.some((s) => s.domain === domain)) {
-    closeSheet();
-    return;
-  }
+  const unit = $("add-limit-unit").value || "minutes";
   const preset = PRESET_SITES.find(
     (s) => s.domain === domain || (s.aliases || []).includes(domain)
   );
-  const site = {
-    id: crypto.randomUUID(),
-    domain: preset?.domain || domain,
-    displayName: preset?.displayName || domain,
-    category: $("add-category").value || "other",
-    dailyLimitMinutes: Math.max(0, Number($("add-limit").value) || 0),
-    redirectUrl: $("add-redirect").value.trim(),
-    aliases: preset?.aliases || []
-  };
-  state.sites = [...state.sites, site];
+  const existing = state.sites.find((s) => s.domain === (preset?.domain || domain));
+  const minutes = limitToMinutes($("add-limit").value, unit);
+  if (existing) {
+    existing.category = $("add-category").value || existing.category;
+    existing.dailyLimitMinutes = minutes;
+    existing.dailyLimitUnit = unit;
+    existing.redirectUrl = $("add-redirect").value.trim();
+  } else {
+    state.sites = [
+      ...state.sites,
+      {
+        id: crypto.randomUUID(),
+        domain: preset?.domain || domain,
+        displayName: preset?.displayName || domain,
+        category: $("add-category").value || "other",
+        dailyLimitMinutes: minutes,
+        dailyLimitUnit: unit,
+        redirectUrl: $("add-redirect").value.trim(),
+        aliases: preset?.aliases || []
+      }
+    ];
+  }
   await saveState(state);
   closeSheet();
+  render();
+}
+
+async function saveRetention() {
+  state.dataRetention = $("data-retention").value === "month" ? "month" : "week";
+  pruneHistory(state);
+  selectedDate = localDateKey();
+  await saveState(state);
   render();
 }
 
@@ -151,45 +178,46 @@ async function saveDowntime() {
 
 function render() {
   const today = localDateKey();
-  if (!weekDateKeys().includes(selectedDate)) selectedDate = today;
+  const periodKeys = retainedDateKeys(state.dataRetention);
+  if (!periodKeys.includes(selectedDate)) selectedDate = today;
 
   const isToday = selectedDate === today;
-  const usageMap = isToday
-    ? state.todayUsage
-    : state.history[selectedDate] || {};
+  const usageMap = usageMapForDate(state, selectedDate);
   const total = sumUsage(usageMap);
+  const heading = dayHeading(selectedDate);
 
   const hero = formatDurationLarge(total);
+  $("hero-eyebrow").textContent = heading;
   $("hero-time").textContent = hero.text;
-  $("hero-delta").textContent = comparisonLine(today, total);
-  $("hero-delta").className = `delta ${comparisonClass(today, total)}`;
+  $("hero-delta").textContent = comparisonLine(selectedDate, total);
+  $("hero-delta").className = `delta ${comparisonClass(selectedDate, total)}`;
 
-  $("most-used-date").textContent = isToday
-    ? "Today"
-    : weekdayLabel(selectedDate);
+  $("most-used-date").textContent = heading;
 
   renderDonut(usageMap);
-  renderSites(usageMap);
-  renderWeek();
+  renderSites(usageMap, isToday);
+  renderPeriod();
   renderDowntime();
+  renderSettings();
 }
 
-function comparisonLine(today, total) {
-  const yesterdayKey = shiftDate(today, -1);
-  const yesterday = totalForDate(state, yesterdayKey);
-  if (!yesterday) return "No data from yesterday yet";
-  const diff = yesterday === 0 ? 0 : Math.round(((total - yesterday) / yesterday) * 100);
+function comparisonLine(dateKey, total) {
+  const prevKey = shiftDate(dateKey, -1);
+  const previous = totalForDate(state, prevKey);
+  const prevName = dayHeading(prevKey).toLowerCase();
+  if (!previous) return `No data from ${prevName} yet`;
+  const diff = previous === 0 ? 0 : Math.round(((total - previous) / previous) * 100);
   const abs = Math.abs(diff);
-  if (diff < 0) return `↓ ${abs}% from yesterday`;
-  if (diff > 0) return `↑ ${abs}% from yesterday`;
-  return "Same as yesterday";
+  if (diff < 0) return `↓ ${abs}% from ${prevName}`;
+  if (diff > 0) return `↑ ${abs}% from ${prevName}`;
+  return `Same as ${prevName}`;
 }
 
-function comparisonClass(today, total) {
-  const yesterday = totalForDate(state, shiftDate(today, -1));
-  if (!yesterday) return "";
-  if (total < yesterday) return "down";
-  if (total > yesterday) return "up";
+function comparisonClass(dateKey, total) {
+  const previous = totalForDate(state, shiftDate(dateKey, -1));
+  if (!previous) return "";
+  if (total < previous) return "down";
+  if (total > previous) return "up";
   return "";
 }
 
@@ -199,21 +227,32 @@ function shiftDate(dateKey, days) {
   return localDateKey(date);
 }
 
-function categoryTotals(usageMap) {
-  const totals = Object.fromEntries(CATEGORIES.map((c) => [c.id, 0]));
-  for (const site of state.sites) {
-    totals[site.category] = (totals[site.category] || 0) + (usageMap[site.domain] || 0);
+function siteSlices(usageMap) {
+  const siteByDomain = new Map((state.sites || []).map((s) => [s.domain, s]));
+  const ranked = Object.entries(usageMap)
+    .filter(([, ms]) => ms > 0)
+    .map(([domain, ms]) => ({
+      domain,
+      label: siteByDomain.get(domain)?.displayName || domain,
+      ms
+    }))
+    .sort((a, b) => b.ms - a.ms);
+
+  const top = ranked.slice(0, 5);
+  const restMs = ranked.slice(5).reduce((sum, row) => sum + row.ms, 0);
+  const slices = top.map((row, i) => ({
+    ...row,
+    color: SITE_SLICE_COLORS[i % SITE_SLICE_COLORS.length]
+  }));
+  if (restMs > 0) {
+    slices.push({ domain: "_other", label: "Other", ms: restMs, color: "#c7c7cc" });
   }
-  const tracked = new Set(state.sites.map((s) => s.domain));
-  for (const [domain, ms] of Object.entries(usageMap)) {
-    if (!tracked.has(domain)) totals.other += ms;
-  }
-  return totals;
+  return slices;
 }
 
 function renderDonut(usageMap) {
-  const totals = categoryTotals(usageMap);
-  const sum = Object.values(totals).reduce((a, b) => a + b, 0);
+  const slices = siteSlices(usageMap);
+  const sum = slices.reduce((a, s) => a + s.ms, 0);
   const svg = $("donut");
   const cx = 60;
   const cy = 60;
@@ -224,39 +263,81 @@ function renderDonut(usageMap) {
   const arcs =
     sum === 0
       ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e5e5ea" stroke-width="14" />`
-      : CATEGORIES.map((cat) => {
-          const frac = totals[cat.id] / sum;
-          const len = frac * circ;
-          const dash = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${cat.color}" stroke-width="14" stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-offset}" stroke-linecap="butt" />`;
-          offset += len;
-          return dash;
-        }).join("");
+      : slices
+          .map((slice) => {
+            const frac = slice.ms / sum;
+            const len = frac * circ;
+            const dash = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${slice.color}" stroke-width="14" stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-offset}" stroke-linecap="butt" />`;
+            offset += len;
+            return dash;
+          })
+          .join("");
 
   svg.innerHTML = `
     <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f2f2f7" stroke-width="14" />
     ${arcs}
   `;
 
-  $("legend").innerHTML = CATEGORIES.map((cat) => {
-    const ms = totals[cat.id];
-    if (sum > 0 && ms === 0) return "";
-    return `<li><span><span class="swatch" style="background:${cat.color}"></span>${cat.label}</span><span>${formatDuration(ms)}</span></li>`;
-  }).join("");
+  $("legend").innerHTML = slices
+    .map(
+      (slice) =>
+        `<li><span><span class="swatch" style="background:${slice.color}"></span>${escapeHtml(slice.label)}</span><span>${formatDuration(slice.ms)}</span></li>`
+    )
+    .join("");
 }
 
-function renderSites(usageMap) {
-  const rows = [...state.sites].sort(
-    (a, b) => (usageMap[b.domain] || 0) - (usageMap[a.domain] || 0)
-  );
+function renderSites(usageMap, isToday) {
+  const siteByDomain = new Map((state.sites || []).map((s) => [s.domain, s]));
+  const rows = Object.entries(usageMap)
+    .filter(([, ms]) => ms > 0)
+    .map(([domain, used]) => {
+      const site = siteByDomain.get(domain) || {
+        id: domain,
+        domain,
+        displayName: domain,
+        category: "other",
+        dailyLimitMinutes: 0,
+        dailyLimitUnit: "minutes",
+        redirectUrl: ""
+      };
+      return { site, used };
+    })
+    .sort((a, b) => b.used - a.used);
+
   $("sites-empty").style.display = rows.length ? "none" : "block";
+  $("sites-empty").textContent = isToday
+    ? "Browse as usual — sites you visit will show up here. Tap one to set a daily limit."
+    : "No websites visited this day.";
+
   $("site-list").innerHTML = rows
-    .map((site) => {
-      const used = usageMap[site.domain] || 0;
+    .map(({ site, used }) => {
+      const unit = site.dailyLimitUnit || "minutes";
       const limitMs = (Number(site.dailyLimitMinutes) || 0) * 60 * 1000;
       const pct = limitMs > 0 ? Math.min(100, (used / limitMs) * 100) : 0;
       const cat = CATEGORY_BY_ID[site.category] || CATEGORY_BY_ID.other;
-      const open = expandedId === site.id ? "open" : "";
+      const open = isToday && expandedId === site.id ? "open" : "";
       const initial = (site.displayName || site.domain).charAt(0).toUpperCase();
+      const bar =
+        isToday && limitMs > 0
+          ? `<div class="bar" aria-hidden="true"><span style="width:${pct}%;background:${cat.color}"></span></div>`
+          : "";
+      const expand = isToday
+        ? `<div class="expand">
+            <label>Daily limit
+              <div class="limit-row">
+                <input type="number" min="0" step="1" value="${escapeHtml(minutesToDisplay(site.dailyLimitMinutes, unit))}" data-limit="${site.id}" />
+                <select data-limit-unit="${site.id}" aria-label="Limit unit">
+                  <option value="minutes" ${unit === "minutes" ? "selected" : ""}>Minutes</option>
+                  <option value="hours" ${unit === "hours" ? "selected" : ""}>Hours</option>
+                </select>
+              </div>
+            </label>
+            <label>Redirect site
+              <input type="text" value="${escapeHtml(site.redirectUrl || "")}" placeholder="leetcode.com" data-redirect="${site.id}" />
+            </label>
+            <button type="button" class="danger-btn" data-remove="${site.id}">Remove limit</button>
+          </div>`
+        : "";
       return `
         <li class="site-row ${open}" data-id="${site.id}">
           <button type="button" class="site-main" data-toggle="${site.id}">
@@ -267,16 +348,8 @@ function renderSites(usageMap) {
             </span>
             <span class="site-time">${formatDuration(used)}</span>
           </button>
-          <div class="bar" aria-hidden="true"><span style="width:${pct}%;background:${cat.color}"></span></div>
-          <div class="expand">
-            <label>Daily limit (minutes)
-              <input type="number" min="0" step="5" value="${site.dailyLimitMinutes}" data-limit="${site.id}" />
-            </label>
-            <label>Redirect site
-              <input type="text" value="${escapeHtml(site.redirectUrl || "")}" placeholder="leetcode.com" data-redirect="${site.id}" />
-            </label>
-            <button type="button" class="danger-btn" data-remove="${site.id}">Remove Website</button>
-          </div>
+          ${bar}
+          ${expand}
         </li>`;
     })
     .join("");
@@ -293,6 +366,7 @@ function renderSites(usageMap) {
   });
 
   $("site-list").onclick = async (e) => {
+    if (!isToday) return;
     const toggle = e.target.closest("[data-toggle]");
     if (toggle) {
       const id = toggle.dataset.toggle;
@@ -302,7 +376,11 @@ function renderSites(usageMap) {
     }
     const remove = e.target.closest("[data-remove]");
     if (remove) {
-      state.sites = state.sites.filter((s) => s.id !== remove.dataset.remove);
+      const site = state.sites.find((s) => s.id === remove.dataset.remove);
+      if (site) {
+        site.dailyLimitMinutes = 0;
+        site.redirectUrl = "";
+      }
       await saveState(state);
       expandedId = null;
       render();
@@ -311,13 +389,29 @@ function renderSites(usageMap) {
 
   $("site-list").onchange = async (e) => {
     const limit = e.target.dataset.limit;
+    const unitId = e.target.dataset.limitUnit;
     const redirect = e.target.dataset.redirect;
-    const site = state.sites.find((s) => s.id === (limit || redirect));
+    const site = state.sites.find((s) => s.id === (limit || unitId || redirect));
     if (!site) return;
-    if (limit) site.dailyLimitMinutes = Math.max(0, Number(e.target.value) || 0);
+    if (limit || unitId) {
+      const row = e.target.closest(".site-row");
+      const unit = row.querySelector("[data-limit-unit]")?.value || site.dailyLimitUnit || "minutes";
+      const value = row.querySelector("[data-limit]")?.value;
+      site.dailyLimitUnit = unit;
+      site.dailyLimitMinutes = limitToMinutes(value, unit);
+    }
     if (redirect) site.redirectUrl = e.target.value.trim();
     await saveState(state);
   };
+}
+
+function renderPeriod() {
+  const isMonth = state.dataRetention === "month";
+  $("period-title").textContent = isMonth ? monthTitle() : "This Week";
+  $("week-chart").classList.toggle("hidden", isMonth);
+  $("month-chart").classList.toggle("hidden", !isMonth);
+  if (isMonth) renderMonth();
+  else renderWeek();
 }
 
 function renderWeek() {
@@ -344,6 +438,47 @@ function renderWeek() {
     selectedDate = btn.dataset.day;
     render();
   };
+}
+
+function renderMonth() {
+  const keys = monthDateKeys();
+  const today = localDateKey();
+  const totals = keys.map((k) => totalForDate(state, k));
+  const max = Math.max(1, ...totals);
+  const firstDow = parseDateKey(keys[0]).getDay();
+  const pad = firstDow === 0 ? 6 : firstDow - 1;
+  const headers = ["M", "T", "W", "T", "F", "S", "S"]
+    .map((label) => `<span class="month-dow">${label}</span>`)
+    .join("");
+  const blanks = Array.from({ length: pad }, () => `<span class="month-cell empty"></span>`).join("");
+  const cells = keys
+    .map((key, i) => {
+      const used = totals[i];
+      const intensity = used <= 0 ? 0 : 0.18 + 0.72 * (used / max);
+      const bg = used > 0 ? `rgba(94, 92, 230, ${intensity.toFixed(2)})` : "#f2f2f7";
+      const color = intensity > 0.55 ? "#ffffff" : "inherit";
+      const active = key === selectedDate ? "active" : "";
+      const isToday = key === today ? "today" : "";
+      const future = key > today ? "future" : "";
+      const dayNum = parseDateKey(key).getDate();
+      return `<button type="button" class="month-cell ${active} ${isToday} ${future}" data-day="${key}" style="background:${bg};color:${color}" title="${formatDuration(used)}">${dayNum}</button>`;
+    })
+    .join("");
+  $("month-chart").innerHTML = headers + blanks + cells;
+  $("month-chart").onclick = (e) => {
+    const btn = e.target.closest("[data-day]");
+    if (!btn || btn.classList.contains("future")) return;
+    selectedDate = btn.dataset.day;
+    render();
+  };
+}
+
+function renderSettings() {
+  $("data-retention").value = state.dataRetention === "month" ? "month" : "week";
+  $("retention-hint").textContent =
+    state.dataRetention === "month"
+      ? "Only this calendar month is kept. When a new month starts, last month is deleted. This is a few kilobytes — it will not slow Chrome."
+      : "Only this week (Mon–Sun) is kept. When a new week starts, last week is deleted. This is a few kilobytes — it will not slow Chrome.";
 }
 
 function renderDowntime() {

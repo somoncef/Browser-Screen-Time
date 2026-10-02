@@ -56,14 +56,20 @@ export const PRESET_BY_DOMAIN = Object.fromEntries(
   PRESET_SITES.map((s) => [s.domain, s])
 );
 
+export const SITE_SLICE_COLORS = [
+  "#5e5ce6",
+  "#bf5af2",
+  "#64d2ff",
+  "#ff9f0a",
+  "#30d158",
+  "#ff375f"
+];
+
 /** Idle after this many seconds is not counted as screen time. */
 export const IDLE_SECONDS = 60;
 
 /** Cap a single flush so a sleeping worker cannot dump hours at once. */
 export const MAX_FLUSH_MS = 5 * 60 * 1000;
-
-/** How many calendar days of per-site history to keep (rolling). */
-export const HISTORY_DAYS = 14;
 
 export const STORAGE_KEY = "bst_state";
 export const SESSION_KEY = "bst_session";

@@ -16,7 +16,7 @@
       </header>
 
       <section class="card today-card">
-        <p class="eyebrow">Today</p>
+        <p class="eyebrow" id="hero-eyebrow">Today</p>
         <p class="hero-time" id="hero-time">0h 0m</p>
         <p class="delta" id="hero-delta">No data from yesterday yet</p>
         <div class="donut-wrap">
@@ -41,10 +41,27 @@
 
       <section class="card">
         <div class="section-head">
-          <h2>This Week</h2>
+          <h2 id="period-title">This Week</h2>
         </div>
         <div class="week" id="week-chart"></div>
+        <div class="month hidden" id="month-chart"></div>
         <p class="hint">Tap a day to see that day’s usage.</p>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Settings</h2>
+        </div>
+        <label class="field">
+          Keep usage data
+          <select id="data-retention">
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+          </select>
+        </label>
+        <p class="hint" id="retention-hint">
+          Older days are deleted automatically when a new week starts. This is a few kilobytes — it will not slow Chrome.
+        </p>
       </section>
 
       <section class="card">

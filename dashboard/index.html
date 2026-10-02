@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Screen Time</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="phone">
+      <header class="nav">
+        <h1>Screen Time</h1>
+        <button type="button" class="nav-btn" id="add-open" aria-label="Add website">
+          +
+        </button>
+      </header>
+
+      <section class="card today-card">
+        <p class="eyebrow">Today</p>
+        <p class="hero-time" id="hero-time">0h 0m</p>
+        <p class="delta" id="hero-delta">No data from yesterday yet</p>
+        <div class="donut-wrap">
+          <svg id="donut" viewBox="0 0 120 120" aria-hidden="true"></svg>
+          <div class="donut-center">
+            <span id="donut-label">All</span>
+          </div>
+        </div>
+        <ul class="legend" id="legend"></ul>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Most Used</h2>
+          <span class="muted" id="most-used-date"></span>
+        </div>
+        <ul class="site-list" id="site-list"></ul>
+        <p class="empty" id="sites-empty">
+          Browse as usual — sites you visit will show up here. Tap one to set a daily limit.
+        </p>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>This Week</h2>
+        </div>
+        <div class="week" id="week-chart"></div>
+        <p class="hint">Tap a day to see that day’s usage.</p>
+      </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2>Downtime</h2>
+          <label class="toggle">
+            <input type="checkbox" id="downtime-enabled" />
+            <span class="toggle-ui"></span>
+          </label>
+        </div>
+        <p class="muted downtime-copy">
+          During Downtime, every website is blocked except Always Allowed.
+        </p>
+        <div class="time-row" id="downtime-times">
+          <label>
+            From
+            <input type="time" id="downtime-start" />
+          </label>
+          <label>
+            To
+            <input type="time" id="downtime-end" />
+          </label>
+        </div>
+        <h3 class="subhead">Always Allowed</h3>
+        <div class="chips" id="allowed-chips"></div>
+        <form class="allowed-form" id="allowed-form">
+          <input
+            type="text"
+            id="allowed-input"
+            placeholder="e.g. gmail.com"
+            autocomplete="off"
+          />
+          <button type="submit" class="text-btn">Add</button>
+        </form>
+      </section>
+    </div>
+
+    <div class="sheet hidden" id="add-sheet" role="dialog" aria-labelledby="add-title">
+      <div class="sheet-card">
+        <div class="sheet-handle"></div>
+        <h2 id="add-title">Add Website</h2>
+        <p class="muted">Optional: add a site before you visit it, or set a limit on one you already use.</p>
+        <div class="presets" id="presets"></div>
+        <label class="field">
+          Domain
+          <input type="text" id="add-domain" placeholder="instagram.com" />
+        </label>
+        <label class="field">
+          Category
+          <select id="add-category"></select>
+        </label>
+        <label class="field">
+          Daily limit
+          <div class="limit-row">
+            <input type="number" id="add-limit" min="0" step="1" value="30" />
+            <select id="add-limit-unit" aria-label="Limit unit">
+              <option value="minutes">Minutes</option>
+              <option value="hours">Hours</option>
+            </select>
+          </div>
+        </label>
+        <label class="field">
+          Redirect when blocked (optional)
+          <input type="text" id="add-redirect" placeholder="leetcode.com" />
+        </label>
+        <div class="sheet-actions">
+          <button type="button" class="ghost" id="add-cancel">Cancel</button>
+          <button type="button" class="primary" id="add-save">Add Site</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="dashboard.js"></script>
+  </body>
+</html>

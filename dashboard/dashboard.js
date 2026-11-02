@@ -1,11 +1,17 @@
 /**
- * Dashboard popup: Today totals, category donut, Most Used list,
- * Add Site sheet, weekly bars, and Downtime controls.
+ * Dashboard popup: Today totals, site donut, Most Used list,
+ * Add Site sheet, weekly bars / month heatmap, and Downtime controls.
  *
  * Reads/writes chrome.storage.local. Usage ticks happen in the service worker.
  */
 
-import { CATEGORIES, PRESET_SITES, CATEGORY_BY_ID, SITE_SLICE_COLORS } from "../shared/constants.js";
+import {
+  CATEGORIES,
+  PRESET_SITES,
+  CATEGORY_BY_ID,
+  QUICK_LIMITS,
+  SITE_SLICE_COLORS
+} from "../shared/constants.js";
 import { faviconUrl, normalizeDomain } from "../shared/domains.js";
 import {
   loadState,
@@ -27,6 +33,7 @@ import {
   weekDateKeys,
   weekdayLabel
 } from "../shared/time.js";
+import { isDowntimeNow } from "../shared/rules.js";
 import { limitToMinutes, minutesToDisplay } from "../shared/sites.js";
 
 const $ = (id) => document.getElementById(id);
@@ -34,21 +41,29 @@ const $ = (id) => document.getElementById(id);
 let selectedDate = localDateKey();
 let expandedId = null;
 let state = null;
+let toastTimer = null;
 
 init();
 
 async function init() {
   fillCategorySelect();
   fillPresets();
+  fillQuickLimits();
   bindEvents();
   state = await loadState();
   render();
   chrome.storage.onChanged.addListener(async (changes, area) => {
-    if (area === "local") {
-      state = await loadState();
-      render();
-    }
+    if (area !== "local") return;
+    state = await loadState();
+    // Usage ticks arrive every minute — don't wipe an input the user is typing in.
+    if (isEditing()) return;
+    render();
   });
+}
+
+/** True while focus is inside a site's limit editor (render() would rebuild it). */
+function isEditing() {
+  return Boolean(document.activeElement?.closest(".expand"));
 }
 
 function fillCategorySelect() {
@@ -60,8 +75,21 @@ function fillCategorySelect() {
 function fillPresets() {
   $("presets").innerHTML = PRESET_SITES.map(
     (s) =>
-      `<button type="button" class="preset" data-domain="${s.domain}">${s.displayName}</button>`
+      `<button type="button" class="preset" data-domain="${s.domain}"><img src="${faviconUrl(s.domain)}" alt="" />${s.displayName}</button>`
   ).join("");
+}
+
+function fillQuickLimits() {
+  $("add-quick").innerHTML = quickButtons(null);
+}
+
+function quickButtons(siteId, currentMinutes) {
+  const target = siteId ? `data-site="${siteId}"` : "";
+  const buttons = QUICK_LIMITS.map((m) => {
+    const selected = currentMinutes === m ? "selected" : "";
+    return `<button type="button" class="quick ${selected}" data-quick="${m}" ${target}>${formatDuration(m * 60000)}</button>`;
+  });
+  return buttons.join("");
 }
 
 function bindEvents() {
@@ -70,6 +98,21 @@ function bindEvents() {
   $("add-save").addEventListener("click", onAddSite);
   $("add-sheet").addEventListener("click", (e) => {
     if (e.target.id === "add-sheet") closeSheet();
+  });
+  $("back-today").addEventListener("click", () => {
+    selectedDate = localDateKey();
+    render();
+  });
+
+  document.addEventListener("keydown", (e) => {
+    const sheetOpen = !$("add-sheet").classList.contains("hidden");
+    if (e.key === "Escape" && sheetOpen) {
+      e.preventDefault();
+      closeSheet();
+    } else if (e.key === "Enter" && sheetOpen && e.target.matches("input")) {
+      e.preventDefault();
+      onAddSite();
+    }
   });
 
   $("presets").addEventListener("click", (e) => {
@@ -80,14 +123,28 @@ function bindEvents() {
     btn.classList.add("selected");
     $("add-domain").value = preset.domain;
     $("add-category").value = preset.category;
+    clearAddError();
+    syncSaveLabel();
   });
+
+  $("add-quick").addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-quick]");
+    if (!btn) return;
+    const minutes = Number(btn.dataset.quick);
+    const unit = minutes % 60 === 0 ? "hours" : "minutes";
+    $("add-limit-unit").value = unit;
+    $("add-limit").value = minutesToDisplay(minutes, unit);
+    syncAddQuick();
+  });
+  $("add-limit").addEventListener("input", syncAddQuick);
+  $("add-limit-unit").addEventListener("change", syncAddQuick);
 
   $("add-domain").addEventListener("input", () => {
     const domain = normalizeDomain($("add-domain").value);
-    const preset = PRESET_SITES.find(
-      (s) => s.domain === domain || (s.aliases || []).includes(domain)
-    );
+    const preset = findPreset(domain);
     if (preset) $("add-category").value = preset.category;
+    clearAddError();
+    syncSaveLabel();
   });
 
   $("downtime-enabled").addEventListener("change", saveDowntime);
@@ -97,15 +154,33 @@ function bindEvents() {
 
   $("allowed-form").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const domain = normalizeDomain($("allowed-input").value);
-    if (!domain) return;
+    const input = $("allowed-input");
+    const domain = normalizeDomain(input.value);
+    if (!isValidDomain(domain)) {
+      input.classList.add("invalid");
+      input.focus();
+      return;
+    }
+    input.classList.remove("invalid");
     if (!state.alwaysAllowed.includes(domain)) {
       state.alwaysAllowed = [...state.alwaysAllowed, domain];
       await saveState(state);
+      showToast(`${domain} is always allowed`);
     }
-    $("allowed-input").value = "";
+    input.value = "";
     render();
   });
+  $("allowed-input").addEventListener("input", () =>
+    $("allowed-input").classList.remove("invalid")
+  );
+}
+
+function findPreset(domain) {
+  return PRESET_SITES.find((s) => s.domain === domain || (s.aliases || []).includes(domain));
+}
+
+function isValidDomain(domain) {
+  return /^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain);
 }
 
 function openSheet() {
@@ -115,23 +190,46 @@ function openSheet() {
   $("add-redirect").value = "";
   $("add-category").value = "other";
   document.querySelectorAll(".preset").forEach((el) => el.classList.remove("selected"));
+  clearAddError();
+  syncAddQuick();
+  syncSaveLabel();
   $("add-sheet").classList.remove("hidden");
+  $("add-domain").focus();
 }
 
 function closeSheet() {
   $("add-sheet").classList.add("hidden");
 }
 
+function clearAddError() {
+  $("add-error").classList.add("hidden");
+  $("add-domain").classList.remove("invalid");
+}
+
+function syncAddQuick() {
+  const minutes = limitToMinutes($("add-limit").value, $("add-limit-unit").value);
+  $("add-quick").querySelectorAll("[data-quick]").forEach((btn) => {
+    btn.classList.toggle("selected", Number(btn.dataset.quick) === minutes);
+  });
+}
+
+function syncSaveLabel() {
+  const domain = normalizeDomain($("add-domain").value);
+  const preset = findPreset(domain);
+  const exists = state?.sites.some((s) => s.domain === (preset?.domain || domain));
+  $("add-save").textContent = exists ? "Update Limit" : "Add Site";
+}
+
 async function onAddSite() {
   const domain = normalizeDomain($("add-domain").value);
-  if (!domain) {
+  if (!isValidDomain(domain)) {
+    $("add-error").classList.remove("hidden");
+    $("add-domain").classList.add("invalid");
     $("add-domain").focus();
     return;
   }
   const unit = $("add-limit-unit").value || "minutes";
-  const preset = PRESET_SITES.find(
-    (s) => s.domain === domain || (s.aliases || []).includes(domain)
-  );
+  const preset = findPreset(domain);
   const existing = state.sites.find((s) => s.domain === (preset?.domain || domain));
   const minutes = limitToMinutes($("add-limit").value, unit);
   if (existing) {
@@ -156,6 +254,8 @@ async function onAddSite() {
   }
   await saveState(state);
   closeSheet();
+  const name = preset?.displayName || domain;
+  showToast(minutes > 0 ? `${name}: ${formatDuration(minutes * 60000)} a day` : `${name} added`);
   render();
 }
 
@@ -174,6 +274,15 @@ async function saveDowntime() {
     end: $("downtime-end").value || "07:00"
   };
   await saveState(state);
+  renderDowntime();
+}
+
+function showToast(message) {
+  const toast = $("toast");
+  toast.textContent = message;
+  toast.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => toast.classList.add("hidden"), 2200);
 }
 
 function render() {
@@ -186,11 +295,18 @@ function render() {
   const total = sumUsage(usageMap);
   const heading = dayHeading(selectedDate);
 
+  $("nav-date").textContent = new Date().toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "long",
+    day: "numeric"
+  });
+
   const hero = formatDurationLarge(total);
   $("hero-eyebrow").textContent = heading;
   $("hero-time").textContent = hero.text;
   $("hero-delta").textContent = comparisonLine(selectedDate, total);
   $("hero-delta").className = `delta ${comparisonClass(selectedDate, total)}`;
+  $("back-today").classList.toggle("hidden", isToday);
 
   $("most-used-date").textContent = heading;
 
@@ -206,10 +322,10 @@ function comparisonLine(dateKey, total) {
   const previous = totalForDate(state, prevKey);
   const prevName = dayHeading(prevKey).toLowerCase();
   if (!previous) return `No data from ${prevName} yet`;
-  const diff = previous === 0 ? 0 : Math.round(((total - previous) / previous) * 100);
+  const diff = Math.round(((total - previous) / previous) * 100);
   const abs = Math.abs(diff);
-  if (diff < 0) return `↓ ${abs}% from ${prevName}`;
-  if (diff > 0) return `↑ ${abs}% from ${prevName}`;
+  if (diff < 0) return `↓ ${abs}% vs ${prevName}`;
+  if (diff > 0) return `↑ ${abs}% vs ${prevName}`;
   return `Same as ${prevName}`;
 }
 
@@ -245,38 +361,39 @@ function siteSlices(usageMap) {
     color: SITE_SLICE_COLORS[i % SITE_SLICE_COLORS.length]
   }));
   if (restMs > 0) {
-    slices.push({ domain: "_other", label: "Other", ms: restMs, color: "#c7c7cc" });
+    slices.push({ domain: "_other", label: "Other", ms: restMs, color: "rgba(255,255,255,0.45)" });
   }
-  return slices;
+  return { slices, count: ranked.length };
 }
 
 function renderDonut(usageMap) {
-  const slices = siteSlices(usageMap);
+  const { slices, count } = siteSlices(usageMap);
   const sum = slices.reduce((a, s) => a + s.ms, 0);
   const svg = $("donut");
   const cx = 60;
   const cy = 60;
   const r = 44;
   const circ = 2 * Math.PI * r;
+  const gap = slices.length > 1 ? 1.5 : 0;
 
   let offset = 0;
-  const arcs =
-    sum === 0
-      ? `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#e5e5ea" stroke-width="14" />`
-      : slices
-          .map((slice) => {
-            const frac = slice.ms / sum;
-            const len = frac * circ;
-            const dash = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${slice.color}" stroke-width="14" stroke-dasharray="${len} ${circ - len}" stroke-dashoffset="${-offset}" stroke-linecap="butt" />`;
-            offset += len;
-            return dash;
-          })
-          .join("");
+  const arcs = slices
+    .map((slice) => {
+      const len = (slice.ms / sum) * circ;
+      const visible = Math.max(0, len - gap);
+      const dash = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${slice.color}" stroke-width="14" stroke-dasharray="${visible} ${circ - visible}" stroke-dashoffset="${-offset}" />`;
+      offset += len;
+      return dash;
+    })
+    .join("");
 
   svg.innerHTML = `
-    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="#f2f2f7" stroke-width="14" />
+    <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="rgba(255,255,255,0.18)" stroke-width="14" />
     ${arcs}
   `;
+
+  $("donut-count").textContent = String(count);
+  $("donut-label").textContent = count === 1 ? "site" : "sites";
 
   $("legend").innerHTML = slices
     .map(
@@ -284,6 +401,13 @@ function renderDonut(usageMap) {
         `<li><span><span class="swatch" style="background:${slice.color}"></span>${escapeHtml(slice.label)}</span><span>${formatDuration(slice.ms)}</span></li>`
     )
     .join("");
+}
+
+/** Bar / badge color: green while comfortable, amber near the limit, red when over. */
+function limitTone(pct) {
+  if (pct >= 100) return { cls: "over", color: "var(--danger)" };
+  if (pct >= 75) return { cls: "warn", color: "var(--warn)" };
+  return { cls: "", color: "var(--good)" };
 }
 
 function renderSites(usageMap, isToday) {
@@ -305,48 +429,66 @@ function renderSites(usageMap, isToday) {
     .sort((a, b) => b.used - a.used);
 
   $("sites-empty").style.display = rows.length ? "none" : "block";
-  $("sites-empty").textContent = isToday
+  $("sites-empty-text").textContent = isToday
     ? "Browse as usual — sites you visit will show up here. Tap one to set a daily limit."
     : "No websites visited this day.";
 
   $("site-list").innerHTML = rows
     .map(({ site, used }) => {
       const unit = site.dailyLimitUnit || "minutes";
-      const limitMs = (Number(site.dailyLimitMinutes) || 0) * 60 * 1000;
+      const limitMin = Number(site.dailyLimitMinutes) || 0;
+      const limitMs = limitMin * 60 * 1000;
       const pct = limitMs > 0 ? Math.min(100, (used / limitMs) * 100) : 0;
+      const tone = limitTone(pct);
       const cat = CATEGORY_BY_ID[site.category] || CATEGORY_BY_ID.other;
       const open = isToday && expandedId === site.id ? "open" : "";
       const initial = (site.displayName || site.domain).charAt(0).toUpperCase();
+
+      let limitTag = "";
+      if (limitMs > 0) {
+        const text = !isToday
+          ? `${formatDuration(limitMs)} limit`
+          : used >= limitMs
+            ? "Limit reached"
+            : `${formatDuration(limitMs - used)} left`;
+        limitTag = `<span class="tag limit-tag ${isToday ? tone.cls : ""}">⏱ ${text}</span>`;
+      }
+
       const bar =
         isToday && limitMs > 0
-          ? `<div class="bar" aria-hidden="true"><span style="width:${pct}%;background:${cat.color}"></span></div>`
+          ? `<div class="bar" aria-hidden="true"><span style="width:${pct}%;background:${tone.color}"></span></div>`
           : "";
       const expand = isToday
         ? `<div class="expand">
-            <label>Daily limit
+            <div class="field-label">Daily limit
+              <div class="quick-limits">${quickButtons(site.id, limitMin)}</div>
               <div class="limit-row">
-                <input type="number" min="0" step="1" value="${escapeHtml(minutesToDisplay(site.dailyLimitMinutes, unit))}" data-limit="${site.id}" />
+                <input type="number" min="0" step="1" value="${escapeHtml(minutesToDisplay(site.dailyLimitMinutes, unit))}" data-limit="${site.id}" aria-label="Daily limit" />
                 <select data-limit-unit="${site.id}" aria-label="Limit unit">
                   <option value="minutes" ${unit === "minutes" ? "selected" : ""}>Minutes</option>
                   <option value="hours" ${unit === "hours" ? "selected" : ""}>Hours</option>
                 </select>
               </div>
-            </label>
-            <label>Redirect site
+            </div>
+            <label>Redirect here when blocked
               <input type="text" value="${escapeHtml(site.redirectUrl || "")}" placeholder="leetcode.com" data-redirect="${site.id}" />
             </label>
-            <button type="button" class="danger-btn" data-remove="${site.id}">Remove limit</button>
+            ${limitMs > 0 || site.redirectUrl ? `<button type="button" class="danger-btn" data-remove="${site.id}">Remove limit</button>` : ""}
           </div>`
         : "";
       return `
         <li class="site-row ${open}" data-id="${site.id}">
-          <button type="button" class="site-main" data-toggle="${site.id}">
+          <button type="button" class="site-main" data-toggle="${site.id}" ${isToday ? "" : "disabled"} aria-expanded="${open ? "true" : "false"}">
             <img class="favicon" src="${faviconUrl(site.domain)}" alt="" data-fallback="${cat.color}|${initial}" />
             <span>
               <span class="site-name">${escapeHtml(site.displayName)}</span>
-              <span class="tag">${cat.label}</span>
+              <span class="meta">
+                <span class="tag" style="--c:${cat.color}">${cat.label}</span>
+                ${limitTag}
+              </span>
             </span>
             <span class="site-time">${formatDuration(used)}</span>
+            ${isToday ? `<span class="chevron" aria-hidden="true">›</span>` : "<span></span>"}
           </button>
           ${bar}
           ${expand}
@@ -374,12 +516,25 @@ function renderSites(usageMap, isToday) {
       render();
       return;
     }
+    const quick = e.target.closest("[data-quick][data-site]");
+    if (quick) {
+      const site = state.sites.find((s) => s.id === quick.dataset.site);
+      if (!site) return;
+      const minutes = Number(quick.dataset.quick);
+      site.dailyLimitMinutes = minutes;
+      site.dailyLimitUnit = minutes % 60 === 0 ? "hours" : "minutes";
+      await saveState(state);
+      showToast(`${site.displayName}: ${formatDuration(minutes * 60000)} a day`);
+      render();
+      return;
+    }
     const remove = e.target.closest("[data-remove]");
     if (remove) {
       const site = state.sites.find((s) => s.id === remove.dataset.remove);
       if (site) {
         site.dailyLimitMinutes = 0;
         site.redirectUrl = "";
+        showToast(`Limit removed for ${site.displayName}`);
       }
       await saveState(state);
       expandedId = null;
@@ -402,12 +557,24 @@ function renderSites(usageMap, isToday) {
     }
     if (redirect) site.redirectUrl = e.target.value.trim();
     await saveState(state);
+    showToast("Saved");
+    e.target.blur();
+    render();
   };
 }
 
 function renderPeriod() {
   const isMonth = state.dataRetention === "month";
+  const keys = isMonth ? monthDateKeys() : weekDateKeys();
+  const today = localDateKey();
+  const pastTotals = keys.filter((k) => k <= today).map((k) => totalForDate(state, k));
+  const daysWithData = pastTotals.filter((t) => t > 0);
+  const avg = daysWithData.length
+    ? daysWithData.reduce((a, b) => a + b, 0) / daysWithData.length
+    : 0;
+
   $("period-title").textContent = isMonth ? monthTitle() : "This Week";
+  $("period-avg").textContent = avg > 0 ? `Daily avg ${formatDuration(avg)}` : "";
   $("week-chart").classList.toggle("hidden", isMonth);
   $("month-chart").classList.toggle("hidden", !isMonth);
   if (isMonth) renderMonth();
@@ -421,11 +588,11 @@ function renderWeek() {
   const max = Math.max(1, ...totals);
   $("week-chart").innerHTML = keys
     .map((key, i) => {
-      const h = Math.max(6, Math.round((totals[i] / max) * 88));
+      const h = totals[i] > 0 ? Math.max(6, Math.round((totals[i] / max) * 88)) : 0;
       const active = key === selectedDate ? "active" : "";
       const isToday = key === today ? "today" : "";
       return `
-        <button type="button" class="week-day ${active} ${isToday}" data-day="${key}" title="${formatDuration(totals[i])}">
+        <button type="button" class="week-day ${active} ${isToday}" data-day="${key}" title="${weekdayLabel(key)} · ${formatDuration(totals[i])}">
           <span class="week-col"><span class="week-fill" style="height:${h}px"></span></span>
           <span class="week-label">${weekdayLabel(key).charAt(0)}</span>
         </button>`;
@@ -438,6 +605,13 @@ function renderWeek() {
     selectedDate = btn.dataset.day;
     render();
   };
+}
+
+/** Heatmap color: cool violet for light days, hot pink for heavy days. */
+function heatColor(ratio) {
+  const hue = 255 + 75 * ratio;
+  const light = 88 - 36 * ratio;
+  return `hsl(${hue.toFixed(0)}, 85%, ${light.toFixed(0)}%)`;
 }
 
 function renderMonth() {
@@ -454,14 +628,15 @@ function renderMonth() {
   const cells = keys
     .map((key, i) => {
       const used = totals[i];
-      const intensity = used <= 0 ? 0 : 0.18 + 0.72 * (used / max);
-      const bg = used > 0 ? `rgba(94, 92, 230, ${intensity.toFixed(2)})` : "#f2f2f7";
-      const color = intensity > 0.55 ? "#ffffff" : "inherit";
+      const ratio = used / max;
+      const style = used > 0
+        ? `background:${heatColor(ratio)};color:${ratio > 0.5 ? "#ffffff" : "#2a1f5c"}`
+        : "";
       const active = key === selectedDate ? "active" : "";
       const isToday = key === today ? "today" : "";
       const future = key > today ? "future" : "";
       const dayNum = parseDateKey(key).getDate();
-      return `<button type="button" class="month-cell ${active} ${isToday} ${future}" data-day="${key}" style="background:${bg};color:${color}" title="${formatDuration(used)}">${dayNum}</button>`;
+      return `<button type="button" class="month-cell ${active} ${isToday} ${future}" data-day="${key}" style="${style}" title="${formatDuration(used)}">${dayNum}</button>`;
     })
     .join("");
   $("month-chart").innerHTML = headers + blanks + cells;
@@ -477,18 +652,21 @@ function renderSettings() {
   $("data-retention").value = state.dataRetention === "month" ? "month" : "week";
   $("retention-hint").textContent =
     state.dataRetention === "month"
-      ? "Only this calendar month is kept. When a new month starts, last month is deleted. This is a few kilobytes — it will not slow Chrome."
-      : "Only this week (Mon–Sun) is kept. When a new week starts, last week is deleted. This is a few kilobytes — it will not slow Chrome.";
+      ? "History resets on the 1st of each month."
+      : "History resets every Monday.";
 }
 
 function renderDowntime() {
-  $("downtime-enabled").checked = Boolean(state.downtime.enabled);
+  const enabled = Boolean(state.downtime.enabled);
+  $("downtime-enabled").checked = enabled;
   $("downtime-start").value = state.downtime.start || "22:00";
   $("downtime-end").value = state.downtime.end || "07:00";
+  $("downtime-times").classList.toggle("off", !enabled);
+  $("downtime-active").classList.toggle("hidden", !isDowntimeNow(state.downtime));
   $("allowed-chips").innerHTML = (state.alwaysAllowed || [])
     .map(
       (d) =>
-        `<span class="chip">${escapeHtml(d)}<button type="button" data-unallow="${escapeHtml(d)}" aria-label="Remove">×</button></span>`
+        `<span class="chip">${escapeHtml(d)}<button type="button" data-unallow="${escapeHtml(d)}" aria-label="Remove ${escapeHtml(d)}">×</button></span>`
     )
     .join("");
 

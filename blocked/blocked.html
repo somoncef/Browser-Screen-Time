@@ -8,7 +8,7 @@
   </head>
   <body>
     <main class="card">
-      <p class="eyebrow">Screen Time</p>
+      <p class="eyebrow" id="eyebrow">Time Limit</p>
       <div class="icon" id="icon">⏱</div>
       <h1 id="title">Time Limit</h1>
       <p class="lead" id="lead">This website is blocked for the rest of today.</p>
@@ -18,11 +18,15 @@
           <dd id="used">—</dd>
         </div>
         <div>
-          <dt>Available again</dt>
+          <dt>Available at</dt>
           <dd id="until">—</dd>
         </div>
       </dl>
       <p class="countdown" id="countdown"></p>
+      <div class="actions">
+        <button type="button" class="primary" id="close-tab">Close tab</button>
+        <button type="button" class="ghost hidden" id="retry">Open site</button>
+      </div>
     </main>
     <script type="module" src="blocked.js"></script>
   </body>

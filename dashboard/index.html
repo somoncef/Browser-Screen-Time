@@ -9,20 +9,29 @@
   <body>
     <div class="phone">
       <header class="nav">
-        <h1>Screen Time</h1>
-        <button type="button" class="nav-btn" id="add-open" aria-label="Add website">
+        <div>
+          <h1>Screen Time</h1>
+          <p class="nav-date" id="nav-date"></p>
+        </div>
+        <button type="button" class="nav-btn" id="add-open" aria-label="Add website" title="Add a website">
           +
         </button>
       </header>
 
-      <section class="card today-card">
-        <p class="eyebrow" id="hero-eyebrow">Today</p>
-        <p class="hero-time" id="hero-time">0h 0m</p>
-        <p class="delta" id="hero-delta">No data from yesterday yet</p>
+      <section class="card hero">
+        <div class="hero-top">
+          <div>
+            <p class="eyebrow" id="hero-eyebrow">Today</p>
+            <p class="hero-time" id="hero-time">0h 0m</p>
+            <p class="delta" id="hero-delta">No data from yesterday yet</p>
+          </div>
+          <button type="button" class="pill-btn hidden" id="back-today">Back to today</button>
+        </div>
         <div class="donut-wrap">
           <svg id="donut" viewBox="0 0 120 120" aria-hidden="true"></svg>
           <div class="donut-center">
-            <span id="donut-label">All</span>
+            <strong id="donut-count">0</strong>
+            <span id="donut-label">sites</span>
           </div>
         </div>
         <ul class="legend" id="legend"></ul>
@@ -30,18 +39,22 @@
 
       <section class="card">
         <div class="section-head">
-          <h2>Most Used</h2>
+          <h2><span class="ico ico-orange">🔥</span>Most Used</h2>
           <span class="muted" id="most-used-date"></span>
         </div>
         <ul class="site-list" id="site-list"></ul>
-        <p class="empty" id="sites-empty">
-          Browse as usual — sites you visit will show up here. Tap one to set a daily limit.
-        </p>
+        <div class="empty" id="sites-empty">
+          <div class="empty-art">🌱</div>
+          <p id="sites-empty-text">
+            Browse as usual — sites you visit will show up here. Tap one to set a daily limit.
+          </p>
+        </div>
       </section>
 
       <section class="card">
         <div class="section-head">
-          <h2 id="period-title">This Week</h2>
+          <h2><span class="ico ico-blue">📊</span><span id="period-title">This Week</span></h2>
+          <span class="muted" id="period-avg"></span>
         </div>
         <div class="week" id="week-chart"></div>
         <div class="month hidden" id="month-chart"></div>
@@ -50,30 +63,15 @@
 
       <section class="card">
         <div class="section-head">
-          <h2>Settings</h2>
-        </div>
-        <label class="field">
-          Keep usage data
-          <select id="data-retention">
-            <option value="week">This week</option>
-            <option value="month">This month</option>
-          </select>
-        </label>
-        <p class="hint" id="retention-hint">
-          Older days are deleted automatically when a new week starts. This is a few kilobytes — it will not slow Chrome.
-        </p>
-      </section>
-
-      <section class="card">
-        <div class="section-head">
-          <h2>Downtime</h2>
-          <label class="toggle">
+          <h2><span class="ico ico-indigo">🌙</span>Downtime</h2>
+          <label class="toggle" title="Turn Downtime on or off">
             <input type="checkbox" id="downtime-enabled" />
             <span class="toggle-ui"></span>
           </label>
         </div>
         <p class="muted downtime-copy">
-          During Downtime, every website is blocked except Always Allowed.
+          Pause every website on a schedule, except the ones you always allow.
+          <span class="status-pill hidden" id="downtime-active">Active now</span>
         </p>
         <div class="time-row" id="downtime-times">
           <label>
@@ -97,13 +95,27 @@
           <button type="submit" class="text-btn">Add</button>
         </form>
       </section>
+
+      <section class="card">
+        <div class="section-head">
+          <h2><span class="ico ico-gray">⚙️</span>Settings</h2>
+        </div>
+        <label class="field inline-field">
+          Keep usage history for
+          <select id="data-retention">
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+          </select>
+        </label>
+        <p class="hint" id="retention-hint"></p>
+      </section>
     </div>
 
     <div class="sheet hidden" id="add-sheet" role="dialog" aria-labelledby="add-title">
       <div class="sheet-card">
         <div class="sheet-handle"></div>
         <h2 id="add-title">Add Website</h2>
-        <p class="muted">Optional: add a site before you visit it, or set a limit on one you already use.</p>
+        <p class="muted">Set a limit before you visit a site, or change one you already use.</p>
         <div class="presets" id="presets"></div>
         <label class="field">
           Domain
@@ -113,26 +125,30 @@
           Category
           <select id="add-category"></select>
         </label>
-        <label class="field">
+        <div class="field">
           Daily limit
+          <div class="quick-limits" id="add-quick"></div>
           <div class="limit-row">
-            <input type="number" id="add-limit" min="0" step="1" value="30" />
+            <input type="number" id="add-limit" min="0" step="1" value="30" aria-label="Daily limit" />
             <select id="add-limit-unit" aria-label="Limit unit">
               <option value="minutes">Minutes</option>
               <option value="hours">Hours</option>
             </select>
           </div>
-        </label>
+        </div>
         <label class="field">
           Redirect when blocked (optional)
           <input type="text" id="add-redirect" placeholder="leetcode.com" />
         </label>
+        <p class="form-error hidden" id="add-error">Enter a website, like instagram.com</p>
         <div class="sheet-actions">
           <button type="button" class="ghost" id="add-cancel">Cancel</button>
           <button type="button" class="primary" id="add-save">Add Site</button>
         </div>
       </div>
     </div>
+
+    <div class="toast hidden" id="toast" role="status"></div>
 
     <script type="module" src="dashboard.js"></script>
   </body>

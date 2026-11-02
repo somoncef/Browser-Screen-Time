@@ -1,9 +1,28 @@
 :root {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
     sans-serif;
-  --bg: #f2f2f7;
-  --text: #1c1c1e;
-  --secondary: #8e8e93;
+  --card: rgba(255, 255, 255, 0.92);
+  --text: #1c1b2e;
+  --secondary: #77738f;
+  --fill: #f1effa;
+  /* Time limit: warm sunset. Overridden for Downtime below. */
+  --theme: linear-gradient(135deg, #ff9a44 0%, #fc6076 50%, #b14bf4 100%);
+  --accent: #fc6076;
+}
+
+body.downtime {
+  /* Downtime: night sky. */
+  --theme: linear-gradient(135deg, #1e1b4b 0%, #4c1d95 55%, #7c3aed 100%);
+  --accent: #7c3aed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --card: rgba(29, 27, 43, 0.92);
+    --text: #f3f1ff;
+    --secondary: #a29dbd;
+    --fill: #2a2740;
+  }
 }
 
 * {
@@ -14,56 +33,60 @@ html,
 body {
   margin: 0;
   min-height: 100%;
-  background: var(--bg);
   color: var(--text);
 }
 
 body {
+  min-height: 100vh;
   display: grid;
   place-items: center;
   padding: 24px;
+  background: var(--theme);
 }
 
 .card {
-  width: min(420px, 100%);
-  background: white;
-  border-radius: 20px;
-  padding: 28px 24px;
+  width: min(440px, 100%);
+  background: var(--card);
+  backdrop-filter: blur(12px);
+  border-radius: 24px;
+  padding: 32px 26px 26px;
   text-align: center;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 20px 60px rgba(30, 10, 60, 0.35);
+  animation: pop 0.35s ease;
 }
 
 .eyebrow {
   margin: 0;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
+  letter-spacing: 0.6px;
   font-size: 12px;
-  font-weight: 700;
-  color: var(--secondary);
+  font-weight: 800;
+  color: var(--accent);
 }
 
 .icon {
-  width: 64px;
-  height: 64px;
+  width: 76px;
+  height: 76px;
   margin: 16px auto;
-  border-radius: 16px;
-  background: #ecebff;
-  color: #5e5ce6;
+  border-radius: 24px;
+  background: var(--theme);
   display: grid;
   place-items: center;
-  font-size: 28px;
+  font-size: 36px;
+  box-shadow: 0 10px 24px rgba(120, 50, 200, 0.35);
 }
 
 h1 {
   margin: 0;
-  font-size: 28px;
-  letter-spacing: -0.4px;
+  font-size: 30px;
+  letter-spacing: -0.5px;
+  overflow-wrap: anywhere;
 }
 
 .lead {
   color: var(--secondary);
   font-size: 15px;
-  line-height: 1.4;
+  line-height: 1.45;
 }
 
 dl {
@@ -74,13 +97,14 @@ dl {
 }
 
 dl > div {
-  background: #f2f2f7;
-  border-radius: 12px;
+  background: var(--fill);
+  border-radius: 14px;
   padding: 12px 8px;
 }
 
 dt {
   font-size: 11px;
+  font-weight: 700;
   color: var(--secondary);
   text-transform: uppercase;
   letter-spacing: 0.3px;
@@ -88,11 +112,55 @@ dt {
 
 dd {
   margin: 4px 0 0;
-  font-size: 18px;
-  font-weight: 700;
+  font-size: 20px;
+  font-weight: 800;
 }
 
 .countdown {
-  color: var(--secondary);
-  font-size: 13px;
+  color: var(--accent);
+  font-size: 14px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.actions button {
+  height: 46px;
+  border: none;
+  border-radius: 14px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary {
+  background: var(--theme);
+  color: white;
+}
+
+.ghost {
+  background: var(--fill);
+  color: var(--text);
+}
+
+.hidden {
+  display: none;
+}
+
+@keyframes pop {
+  from {
+    transform: scale(0.94);
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card {
+    animation: none;
+  }
 }

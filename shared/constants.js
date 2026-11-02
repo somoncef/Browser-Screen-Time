@@ -56,14 +56,18 @@ export const PRESET_BY_DOMAIN = Object.fromEntries(
   PRESET_SITES.map((s) => [s.domain, s])
 );
 
+/** Donut slice colors — bright so they pop on the gradient hero card. */
 export const SITE_SLICE_COLORS = [
-  "#5e5ce6",
-  "#bf5af2",
-  "#64d2ff",
-  "#ff9f0a",
-  "#30d158",
-  "#ff375f"
+  "#ffd60a",
+  "#5ef0ff",
+  "#6dffa8",
+  "#ffb04a",
+  "#ffffff",
+  "#ffa3d7"
 ];
+
+/** One-tap limit choices in the dashboard (minutes). */
+export const QUICK_LIMITS = [15, 30, 60, 120];
 
 /** Idle after this many seconds is not counted as screen time. */
 export const IDLE_SECONDS = 60;
